@@ -1,0 +1,360 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  clearToken,
+  getToken,
+  getDashboard,
+  getLabTrend,
+  listDocuments,
+  listLabReports,
+  listPrescriptions,
+  uploadDocument,
+  DashboardStats,
+  DocumentRecord,
+  LabReport,
+  Prescription,
+  getMe,
+  User,
+} from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Sidebar } from "@/components/dashboard/sidebar";
+import { StatCard } from "@/components/dashboard/stat-card";
+import { LabLevelCard } from "@/components/dashboard/lab-level-card";
+import { ReportGenerator } from "@/components/dashboard/report-generator";
+import { ChatWidget } from "@/components/chat/chat-widget";
+import {
+  ActivitySquare,
+  AlertTriangle,
+  FileText,
+  FlaskConical,
+  Pill,
+  UploadCloud,
+} from "lucide-react";
+
+function latestLabValues(reports: LabReport[]) {
+  // Reports arrive ordered newest-first, so the first time a test is seen is its latest reading.
+  const seen = new Set<string>();
+  const latest = [];
+  for (const report of reports) {
+    for (const value of report.lab_values) {
+      const key = value.test_name_normalized || value.test_name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      latest.push(value);
+    }
+  }
+  return latest;
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [user, setUser] = useState<User | null>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [labReports, setLabReports] = useState<LabReport[]>([]);
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [trends, setTrends] = useState<Record<string, number[]>>({});
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    const [s, d, l, p] = await Promise.all([
+      getDashboard(),
+      listDocuments(),
+      listLabReports(),
+      listPrescriptions(),
+    ]);
+    setStats(s);
+    setDocuments(d);
+    setLabReports(l);
+    setPrescriptions(p);
+  }, []);
+
+  useEffect(() => {
+    if (!getToken()) {
+      router.replace("/login");
+      return;
+    }
+    getMe()
+      .then(setUser)
+      .catch(() => {
+        clearToken();
+        router.replace("/login");
+      });
+    refresh().catch((err) => setError(err.message));
+  }, [router, refresh]);
+
+  // Poll while any document is still pending/processing.
+  useEffect(() => {
+    const hasInFlight = documents.some(
+      (d) => d.processing_status === "pending" || d.processing_status === "processing"
+    );
+    if (!hasInFlight) return;
+    const interval = setInterval(() => {
+      refresh().catch((err) => setError(err.message));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [documents, refresh]);
+
+  // Fetch historical trend points for each distinct test once lab reports load.
+  useEffect(() => {
+    const testNames = Array.from(
+      new Set(
+        labReports.flatMap((r) => r.lab_values.map((v) => v.test_name_normalized || v.test_name))
+      )
+    );
+    if (testNames.length === 0) return;
+    Promise.all(
+      testNames.map((name) =>
+        getLabTrend(name)
+          .then((points) => [name, points.filter((p) => p.value != null).map((p) => p.value as number)] as const)
+          .catch(() => [name, []] as const)
+      )
+    ).then((results) => {
+      setTrends(Object.fromEntries(results));
+    });
+  }, [labReports]);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+    setUploading(true);
+    try {
+      await uploadDocument(file);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function handleLogout() {
+    clearToken();
+    router.replace("/login");
+  }
+
+  return (
+    <div className="flex min-h-screen bg-slate-100">
+      <Sidebar user={user} onLogout={handleLogout} />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Mobile header */}
+        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">
+              <ActivitySquare className="h-4 w-4" />
+            </span>
+            <span className="font-semibold text-slate-900">MedRecords</span>
+          </div>
+          <Button variant="secondary" onClick={handleLogout}>
+            Log out
+          </Button>
+        </div>
+
+        <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-8 sm:px-6 lg:px-10">
+          <div id="overview" className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-900">Overview</h1>
+              <p className="text-sm text-slate-500">
+                {user ? `Welcome back, ${user.full_name.split(" ")[0]}` : "Loading your records..."}
+              </p>
+            </div>
+            <label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,image/jpeg,image/png,image/jpg"
+                onChange={handleUpload}
+                disabled={uploading}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="cursor-pointer"
+              >
+                <UploadCloud className="h-4 w-4" />
+                {uploading ? "Uploading..." : "Upload document"}
+              </Button>
+            </label>
+          </div>
+
+          {error && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+          )}
+
+          {stats && (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <StatCard label="Prescriptions" value={stats.prescription_count} icon={FileText} tone="brand" />
+              <StatCard label="Medications" value={stats.medication_count} icon={Pill} tone="green" />
+              <StatCard label="Lab reports" value={stats.lab_report_count} icon={FlaskConical} tone="amber" />
+              <StatCard label="Abnormal values" value={stats.abnormal_lab_values} icon={AlertTriangle} tone="red" />
+            </div>
+          )}
+
+          {labReports.length > 0 && (
+            <div>
+              <h2 className="mb-3 text-sm font-semibold text-slate-700">Detected levels</h2>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {latestLabValues(labReports).map((v) => (
+                  <LabLevelCard
+                    key={v.id}
+                    value={v}
+                    trend={trends[v.test_name_normalized || v.test_name]}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Card id="documents">
+            <CardHeader title="Documents" subtitle="Everything you've uploaded" icon={<FileText className="h-4 w-4" />} />
+            {documents.length === 0 ? (
+              <EmptyState text="No documents yet — upload your first record above." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="text-xs uppercase tracking-wide text-slate-400">
+                      <th className="pb-2 font-medium">File</th>
+                      <th className="pb-2 font-medium">Type</th>
+                      <th className="pb-2 font-medium">Source</th>
+                      <th className="pb-2 font-medium text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {documents.map((doc) => (
+                      <tr key={doc.id}>
+                        <td className="py-3 pr-4">
+                          <p className="font-medium text-slate-900">{doc.file_name}</p>
+                          {doc.processing_status === "failed" && doc.processing_error && (
+                            <p className="mt-0.5 text-xs text-red-600">{doc.processing_error}</p>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-500">{doc.document_type || "unclassified"}</td>
+                        <td className="py-3 pr-4 text-slate-500">{doc.hospital_name || "—"}</td>
+                        <td className="py-3 text-right">
+                          <StatusBadge status={doc.processing_status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          <Card id="lab-reports">
+            <CardHeader title="Lab reports" subtitle="Test results from your uploads" icon={<FlaskConical className="h-4 w-4" />} />
+            {labReports.length === 0 ? (
+              <EmptyState text="No lab reports yet." />
+            ) : (
+              <div className="space-y-6">
+                {labReports.map((report) => (
+                  <div key={report.id}>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {report.report_type || "Lab Report"}
+                      {report.lab_name ? (
+                        <span className="font-normal text-slate-500"> · {report.lab_name}</span>
+                      ) : null}
+                    </p>
+                    <div className="mt-2 overflow-x-auto rounded-lg border border-slate-100">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
+                            <th className="px-3 py-2 font-medium">Test</th>
+                            <th className="px-3 py-2 font-medium">Value</th>
+                            <th className="px-3 py-2 font-medium">Range</th>
+                            <th className="px-3 py-2 font-medium text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {report.lab_values.map((v) => (
+                            <tr key={v.id}>
+                              <td className="px-3 py-2">{v.test_name_normalized || v.test_name}</td>
+                              <td className="px-3 py-2">
+                                {v.value_text || v.value} {v.unit || ""}
+                              </td>
+                              <td className="px-3 py-2 text-slate-500">{v.reference_range_text || "—"}</td>
+                              <td className="px-3 py-2 text-right">
+                                {v.is_abnormal ? (
+                                  <Badge tone="red">Abnormal</Badge>
+                                ) : (
+                                  <Badge tone="green">Normal</Badge>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card id="prescriptions">
+            <CardHeader title="Prescriptions" subtitle="Diagnoses and medications" icon={<Pill className="h-4 w-4" />} />
+            {prescriptions.length === 0 ? (
+              <EmptyState text="No prescriptions yet." />
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {prescriptions.map((rx) => (
+                  <div key={rx.id} className="rounded-lg border border-slate-100 p-4">
+                    <p className="text-sm font-semibold text-slate-900">{rx.diagnosis || "Prescription"}</p>
+                    {rx.doctor_name && <p className="text-xs text-slate-500">{rx.doctor_name}</p>}
+                    <ul className="mt-3 space-y-1.5">
+                      {rx.medications.map((m) => (
+                        <li key={m.id} className="flex items-baseline gap-2 text-sm">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400" />
+                          <span className="text-slate-800">
+                            {m.name}{" "}
+                            <span className="text-slate-500">
+                              {m.dosage} {m.frequency ? `· ${m.frequency}` : ""}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <ReportGenerator />
+        </main>
+      </div>
+
+      <ChatWidget />
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-500">
+      {text}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: DocumentRecord["processing_status"] }) {
+  const tone = {
+    pending: "slate",
+    processing: "amber",
+    completed: "green",
+    failed: "red",
+  } as const;
+  return <Badge tone={tone[status]}>{status}</Badge>;
+}

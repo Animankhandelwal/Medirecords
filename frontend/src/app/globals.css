@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #f4f5f9;
+  color: #0f172a;
+}
+
+* {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
