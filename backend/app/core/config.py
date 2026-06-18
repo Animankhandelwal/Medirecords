@@ -1,4 +1,18 @@
+import os
+import tempfile
+
 from pydantic_settings import BaseSettings
+
+# On hosts with no file system access (Render, Hugging Face Spaces), the Google
+# service account key is supplied as a raw JSON string via GOOGLE_APPLICATION_CREDENTIALS_JSON
+# instead of a file path. Materialize it to a temp file so google-cloud-vision's
+# default credential loading (which only understands file paths) still works.
+_creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if _creds_json and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+    _creds_path = os.path.join(tempfile.gettempdir(), "gcp-credentials.json")
+    with open(_creds_path, "w") as f:
+        f.write(_creds_json)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _creds_path
 
 
 class Settings(BaseSettings):
