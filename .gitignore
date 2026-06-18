@@ -1,7 +1,13 @@
 .env
+.env.local
+.env.*.local
 .venv/
 __pycache__/
 *.pyc
 *.db
 node_modules/
 .DS_Store
+.next/
+*.tsbuildinfo
+.idea/
+Sample-Smart-Report-Clinics.pdf
