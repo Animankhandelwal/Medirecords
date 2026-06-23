@@ -5,6 +5,7 @@
 __pycache__/
 *.pyc
 *.db
+backend/app/uploads/
 node_modules/
 .DS_Store
 .next/

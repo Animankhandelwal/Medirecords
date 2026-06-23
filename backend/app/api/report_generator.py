@@ -10,21 +10,9 @@ from app.services.report_service import (
     render_report_pdf,
     stream_consultation_report,
 )
+from app.core.constants import SPECIALIST_TYPES
 
 router = APIRouter(prefix="/report", tags=["report-generator"])
-
-SPECIALIST_TYPES = [
-    "Endocrinologist",
-    "Cardiologist",
-    "Nephrologist",
-    "General Physician",
-    "Neurologist",
-    "Gastroenterologist",
-    "Orthopedist",
-    "Dermatologist",
-    "Pulmonologist",
-    "Rheumatologist",
-]
 
 
 class ReportRequest(BaseModel):

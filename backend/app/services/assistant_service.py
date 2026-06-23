@@ -1,9 +1,11 @@
 from typing import Generator
 from sqlalchemy.orm import Session
 from app.core import llm_orchestrator
+from app.core.constants import SPECIALIST_TYPES
 from app.models.user import User
 from app.models.prescription import Prescription, Medication
 from app.models.lab_report import LabReport, LabValue
+from app.services.extraction_service import _parse_json
 
 
 def build_patient_context(user: User, db: Session) -> str:
@@ -90,3 +92,39 @@ def chat_stream(user: User, db: Session, messages: list[dict], provider: str = N
     system = f"{SYSTEM_PROMPT}\n\n{context}"
 
     yield from llm_orchestrator.chat_stream(messages, system=system, max_tokens=2000, provider=provider)
+
+
+SPECIALIST_SUGGESTION_PROMPT = f"""You are a medical triage assistant. Based on the conversation between a \
+patient and an AI health assistant, plus the patient's medical history, recommend which type of specialist \
+the patient should consult.
+
+Choose exactly one specialist_type from this list (use the exact spelling): {", ".join(SPECIALIST_TYPES)}
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{{
+  "specialist_type": "one of the listed types, exact match",
+  "reasoning": "2-3 sentences explaining the recommendation, referencing specific symptoms or history mentioned",
+  "urgency": "routine" | "soon" | "urgent",
+  "summary_for_doctor": "a short 1-2 sentence summary of the concern to bring up at the appointment"
+}}
+
+If the conversation does not contain enough information to make a confident recommendation, set specialist_type \
+to "General Physician" and explain what's missing in the reasoning."""
+
+
+def suggest_specialist(user: User, db: Session, messages: list[dict], provider: str = None) -> dict:
+    """Analyze the chat conversation plus medical history and recommend a specialist to consult."""
+    context = build_patient_context(user, db)
+    conversation = "\n".join(
+        f"{m['role'].capitalize()}: {m['content']}" for m in messages if m.get("content")
+    )
+    prompt = (
+        f"{SPECIALIST_SUGGESTION_PROMPT}\n\n"
+        f"## Patient Medical History\n{context}\n\n"
+        f"## Conversation\n{conversation}"
+    )
+    text = llm_orchestrator.complete(prompt, max_tokens=500, provider=provider)
+    data = _parse_json(text)
+    if data.get("specialist_type") not in SPECIALIST_TYPES:
+        data["specialist_type"] = "General Physician"
+    return data

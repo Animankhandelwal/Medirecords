@@ -6,7 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { FileDown, Stethoscope } from "lucide-react";
 
-export function ReportGenerator() {
+export function ReportGenerator({
+  suggestedSpecialist,
+}: {
+  suggestedSpecialist?: string | null;
+}) {
   const [specialists, setSpecialists] = useState<string[]>([]);
   const [specialistType, setSpecialistType] = useState("");
   const [symptoms, setSymptoms] = useState("");
@@ -19,10 +23,16 @@ export function ReportGenerator() {
     listSpecialists()
       .then((list) => {
         setSpecialists(list);
-        setSpecialistType(list[0] || "");
+        setSpecialistType(suggestedSpecialist || list[0] || "");
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (suggestedSpecialist && specialists.includes(suggestedSpecialist)) {
+      setSpecialistType(suggestedSpecialist);
+    }
+  }, [suggestedSpecialist, specialists]);
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault();
@@ -73,6 +83,9 @@ export function ReportGenerator() {
               </option>
             ))}
           </select>
+          {suggestedSpecialist && specialistType === suggestedSpecialist && (
+            <p className="mt-1 text-xs text-brand-600">Suggested by your assistant conversation</p>
+          )}
         </div>
 
         <div>

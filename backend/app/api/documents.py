@@ -1,6 +1,12 @@
 import asyncio
+import io
+import os
+import zipfile
 from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi.responses import Response
+from sqlalchemy import extract, func
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.user import User
@@ -29,16 +35,15 @@ async def upload_document(
     if len(file_bytes) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File size must be under 20MB")
 
-    try:
-        s3_key, file_url = storage_service.upload_file(file_bytes, file.filename, file.content_type)
-    except Exception:
-        # Local fallback: store as base URL reference
-        file_url = f"/local/{file.filename}"
+    storage_key, file_url, backend = storage_service.upload_file(file_bytes, file.filename, file.content_type)
 
     doc = Document(
         user_id=current_user.id,
         file_name=file.filename,
         file_url=file_url,
+        content_type=file.content_type,
+        storage_key=storage_key,
+        storage_backend=backend,
         processing_status=ProcessingStatus.PENDING,
     )
     db.add(doc)
@@ -50,13 +55,102 @@ async def upload_document(
     return {"id": doc.id, "status": "processing", "file_name": file.filename}
 
 
+def _filtered_documents_query(
+    db: Session,
+    user_id: int,
+    year: Optional[int],
+    month: Optional[int],
+    day: Optional[int],
+):
+    """Filter documents by year/month/day, falling back to upload date when a
+    document's date couldn't be extracted from its contents."""
+    effective_date = func.coalesce(Document.document_date, Document.created_at)
+    query = db.query(Document).filter(Document.user_id == user_id)
+    if year is not None:
+        query = query.filter(extract("year", effective_date) == year)
+    if month is not None:
+        query = query.filter(extract("month", effective_date) == month)
+    if day is not None:
+        query = query.filter(extract("day", effective_date) == day)
+    return query
+
+
 @router.get("/")
 def list_documents(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    day: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    docs = db.query(Document).filter(Document.user_id == current_user.id).order_by(Document.created_at.desc()).all()
+    docs = (
+        _filtered_documents_query(db, current_user.id, year, month, day)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
     return [_doc_dict(d) for d in docs]
+
+
+@router.get("/export/zip")
+def export_documents_zip(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    day: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Bundle every document matching the given year/month/day into a zip."""
+    docs = (
+        _filtered_documents_query(db, current_user.id, year, month, day)
+        .filter(Document.storage_key.isnot(None))
+        .order_by(Document.created_at.desc())
+        .all()
+    )
+    if not docs:
+        raise HTTPException(status_code=404, detail="No downloadable documents match that date")
+
+    buffer = io.BytesIO()
+    used_names = set()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for doc in docs:
+            try:
+                file_bytes = storage_service.download_file(doc.storage_key, doc.storage_backend or "local")
+            except Exception:
+                continue
+            name = doc.file_name
+            if name in used_names:
+                base, ext = os.path.splitext(name)
+                name = f"{base}-{doc.id}{ext}"
+            used_names.add(name)
+            zf.writestr(name, file_bytes)
+    buffer.seek(0)
+
+    label = "-".join(str(p) for p in (year, month, day) if p is not None) or "all"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="documents-{label}.zip"'},
+    )
+
+
+@router.get("/{doc_id}/download")
+def download_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.storage_key:
+        raise HTTPException(status_code=404, detail="Original file is not available for this document")
+
+    file_bytes = storage_service.download_file(doc.storage_key, doc.storage_backend or "local")
+    return Response(
+        content=file_bytes,
+        media_type=doc.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{doc.file_name}"'},
+    )
 
 
 @router.get("/{doc_id}")
@@ -206,4 +300,6 @@ def _doc_dict(doc: Document) -> dict:
         "hospital_name": doc.hospital_name,
         "document_date": doc.document_date.isoformat() if doc.document_date else None,
         "created_at": doc.created_at.isoformat(),
+        "content_type": doc.content_type,
+        "downloadable": doc.storage_key is not None,
     }

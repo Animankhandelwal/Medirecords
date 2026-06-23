@@ -87,6 +87,8 @@ export interface DocumentRecord {
   hospital_name: string | null;
   document_date: string | null;
   created_at: string;
+  content_type: string | null;
+  downloadable: boolean;
 }
 
 export function uploadDocument(file: File): Promise<{ id: number; status: string; file_name: string }> {
@@ -98,8 +100,56 @@ export function uploadDocument(file: File): Promise<{ id: number; status: string
   });
 }
 
-export function listDocuments(): Promise<DocumentRecord[]> {
-  return request("/documents/");
+export interface DocumentDateFilter {
+  year?: number;
+  month?: number;
+  day?: number;
+}
+
+function dateFilterQuery(filter: DocumentDateFilter): string {
+  const entries = Object.entries(filter).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) return "";
+  return "?" + entries.map(([k, v]) => `${k}=${v}`).join("&");
+}
+
+export function listDocuments(filter: DocumentDateFilter = {}): Promise<DocumentRecord[]> {
+  return request(`/documents/${dateFilterQuery(filter)}`);
+}
+
+async function downloadBlob(path: string, fallbackFilename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      // ignore parse error, fall back to statusText
+    }
+    throw new Error(detail);
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = match ? match[1] : fallbackFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function downloadDocument(doc: DocumentRecord): Promise<void> {
+  return downloadBlob(`/documents/${doc.id}/download`, doc.file_name);
+}
+
+export function downloadDocumentsZip(filter: DocumentDateFilter = {}): Promise<void> {
+  return downloadBlob(`/documents/export/zip${dateFilterQuery(filter)}`, "documents.zip");
 }
 
 export function getDocument(id: number): Promise<DocumentRecord> {
@@ -225,6 +275,21 @@ export async function streamChat(
 
 export function listSpecialists(): Promise<string[]> {
   return request("/report/specialists");
+}
+
+export interface SpecialistSuggestion {
+  specialist_type: string;
+  reasoning: string;
+  urgency: "routine" | "soon" | "urgent";
+  summary_for_doctor: string;
+}
+
+export function suggestSpecialist(messages: ChatMessage[]): Promise<SpecialistSuggestion> {
+  return request("/assistant/suggest-specialist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
 }
 
 export async function generateReportPdf(data: {

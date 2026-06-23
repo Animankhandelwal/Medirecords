@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, type ChatMessage } from "@/lib/api";
-import { MessageCircle, Send, X } from "lucide-react";
+import { streamChat, suggestSpecialist, type ChatMessage } from "@/lib/api";
+import { MessageCircle, Send, Stethoscope, X } from "lucide-react";
 
 const GREETING: ChatMessage = {
   role: "assistant",
@@ -10,11 +10,16 @@ const GREETING: ChatMessage = {
     "Hi! I can answer questions about your prescriptions, medications, and lab results, or help you note down symptoms to discuss with your doctor. What would you like to know?",
 };
 
-export function ChatWidget() {
+export function ChatWidget({
+  onSpecialistSuggested,
+}: {
+  onSpecialistSuggested?: (specialistType: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +52,29 @@ export function ChatWidget() {
     }
   }
 
+  async function handleSuggest() {
+    const conversation = messages.filter((m) => m.content.trim());
+    if (conversation.length === 0 || suggesting || loading) return;
+    setSuggesting(true);
+    setError("");
+    try {
+      const suggestion = await suggestSpecialist(conversation);
+      const summary = [
+        `Recommended specialist: ${suggestion.specialist_type} (${suggestion.urgency})`,
+        suggestion.reasoning,
+        `What to tell the doctor: ${suggestion.summary_for_doctor}`,
+      ].join("\n\n");
+      setMessages((prev) => [...prev, { role: "assistant", content: summary }]);
+      onSpecialistSuggested?.(suggestion.specialist_type);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't get a recommendation");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  const hasUserMessage = messages.some((m) => m.role === "user");
+
   return (
     <>
       <button
@@ -73,7 +101,7 @@ export function ChatWidget() {
             {messages.map((m, i) => (
               <div
                 key={i}
-                className={`max-w-[85%] rounded-xl px-3.5 py-2 text-sm leading-relaxed ${
+                className={`max-w-[85%] whitespace-pre-line rounded-xl px-3.5 py-2 text-sm leading-relaxed ${
                   m.role === "user"
                     ? "ml-auto bg-brand-600 text-white"
                     : "bg-slate-100 text-slate-800"
@@ -86,6 +114,19 @@ export function ChatWidget() {
               <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
             )}
           </div>
+
+          {hasUserMessage && (
+            <div className="border-t border-slate-100 px-3 py-2">
+              <button
+                onClick={handleSuggest}
+                disabled={suggesting || loading}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+              >
+                <Stethoscope className="h-3.5 w-3.5" />
+                {suggesting ? "Analyzing conversation..." : "Suggest a specialist"}
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handleSend} className="flex items-center gap-2 border-t border-slate-100 p-3">
             <input

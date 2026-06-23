@@ -34,6 +34,9 @@ class Document(Base):
     doctor_name = Column(String, nullable=True)
     hospital_name = Column(String, nullable=True)
     document_date = Column(DateTime, nullable=True)
+    content_type = Column(String, nullable=True)
+    storage_backend = Column(String, nullable=True)  # "s3" | "local"
+    storage_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

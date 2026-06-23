@@ -11,7 +11,10 @@ import {
   listLabReports,
   listPrescriptions,
   uploadDocument,
+  downloadDocument,
+  downloadDocumentsZip,
   DashboardStats,
+  DocumentDateFilter,
   DocumentRecord,
   LabReport,
   Prescription,
@@ -29,11 +32,17 @@ import { ChatWidget } from "@/components/chat/chat-widget";
 import {
   ActivitySquare,
   AlertTriangle,
+  Download,
   FileText,
   FlaskConical,
   Pill,
   UploadCloud,
 } from "lucide-react";
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 function latestLabValues(reports: LabReport[]) {
   // Reports arrive ordered newest-first, so the first time a test is seen is its latest reading.
@@ -62,11 +71,15 @@ export default function DashboardPage() {
   const [trends, setTrends] = useState<Record<string, number[]>>({});
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [suggestedSpecialist, setSuggestedSpecialist] = useState<string | null>(null);
+  const [docFilter, setDocFilter] = useState<DocumentDateFilter>({});
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [zipDownloading, setZipDownloading] = useState(false);
 
   const refresh = useCallback(async () => {
     const [s, d, l, p] = await Promise.all([
       getDashboard(),
-      listDocuments(),
+      listDocuments(docFilter),
       listLabReports(),
       listPrescriptions(),
     ]);
@@ -74,7 +87,7 @@ export default function DashboardPage() {
     setDocuments(d);
     setLabReports(l);
     setPrescriptions(p);
-  }, []);
+  }, [docFilter]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -87,8 +100,11 @@ export default function DashboardPage() {
         clearToken();
         router.replace("/login");
       });
+  }, [router]);
+
+  useEffect(() => {
     refresh().catch((err) => setError(err.message));
-  }, [router, refresh]);
+  }, [refresh]);
 
   // Poll while any document is still pending/processing.
   useEffect(() => {
@@ -140,6 +156,30 @@ export default function DashboardPage() {
   function handleLogout() {
     clearToken();
     router.replace("/login");
+  }
+
+  async function handleDownloadOne(doc: DocumentRecord) {
+    setError("");
+    setDownloadingId(doc.id);
+    try {
+      await downloadDocument(doc);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function handleDownloadZip() {
+    setError("");
+    setZipDownloading(true);
+    try {
+      await downloadDocumentsZip(docFilter);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setZipDownloading(false);
+    }
   }
 
   return (
@@ -218,8 +258,96 @@ export default function DashboardPage() {
 
           <Card id="documents">
             <CardHeader title="Documents" subtitle="Everything you've uploaded" icon={<FileText className="h-4 w-4" />} />
+
+            <div className="mb-4 flex flex-wrap items-end gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Year</label>
+                <select
+                  value={docFilter.year ?? ""}
+                  onChange={(e) =>
+                    setDocFilter((f) => ({
+                      ...f,
+                      year: e.target.value ? Number(e.target.value) : undefined,
+                    }))
+                  }
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="">All years</option>
+                  {Array.from({ length: 8 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Month</label>
+                <select
+                  value={docFilter.month ?? ""}
+                  onChange={(e) =>
+                    setDocFilter((f) => ({
+                      ...f,
+                      month: e.target.value ? Number(e.target.value) : undefined,
+                    }))
+                  }
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="">All months</option>
+                  {MONTH_NAMES.map((name, i) => (
+                    <option key={name} value={i + 1}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Day</label>
+                <select
+                  value={docFilter.day ?? ""}
+                  onChange={(e) =>
+                    setDocFilter((f) => ({
+                      ...f,
+                      day: e.target.value ? Number(e.target.value) : undefined,
+                    }))
+                  }
+                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="">All days</option>
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {(docFilter.year || docFilter.month || docFilter.day) && (
+                <Button variant="secondary" onClick={() => setDocFilter({})}>
+                  Clear filter
+                </Button>
+              )}
+
+              <Button
+                variant="secondary"
+                onClick={handleDownloadZip}
+                disabled={zipDownloading || documents.length === 0}
+                className="ml-auto"
+              >
+                <Download className="h-4 w-4" />
+                {zipDownloading ? "Preparing zip..." : "Download all (zip)"}
+              </Button>
+            </div>
+
             {documents.length === 0 ? (
-              <EmptyState text="No documents yet — upload your first record above." />
+              <EmptyState
+                text={
+                  docFilter.year || docFilter.month || docFilter.day
+                    ? "No documents match this date — try a different filter."
+                    : "No documents yet — upload your first record above."
+                }
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -228,7 +356,9 @@ export default function DashboardPage() {
                       <th className="pb-2 font-medium">File</th>
                       <th className="pb-2 font-medium">Type</th>
                       <th className="pb-2 font-medium">Source</th>
+                      <th className="pb-2 font-medium">Date</th>
                       <th className="pb-2 font-medium text-right">Status</th>
+                      <th className="pb-2 font-medium text-right">Download</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -242,8 +372,21 @@ export default function DashboardPage() {
                         </td>
                         <td className="py-3 pr-4 text-slate-500">{doc.document_type || "unclassified"}</td>
                         <td className="py-3 pr-4 text-slate-500">{doc.hospital_name || "—"}</td>
+                        <td className="py-3 pr-4 text-slate-500">
+                          {new Date(doc.document_date || doc.created_at).toLocaleDateString()}
+                        </td>
                         <td className="py-3 text-right">
                           <StatusBadge status={doc.processing_status} />
+                        </td>
+                        <td className="py-3 pl-4 text-right">
+                          <button
+                            onClick={() => handleDownloadOne(doc)}
+                            disabled={!doc.downloadable || downloadingId === doc.id}
+                            title={doc.downloadable ? "Download original file" : "Original file not available"}
+                            className="text-slate-400 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-30"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -332,11 +475,11 @@ export default function DashboardPage() {
             )}
           </Card>
 
-          <ReportGenerator />
+          <ReportGenerator suggestedSpecialist={suggestedSpecialist} />
         </main>
       </div>
 
-      <ChatWidget />
+      <ChatWidget onSpecialistSuggested={setSuggestedSpecialist} />
     </div>
   );
 }
