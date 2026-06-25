@@ -6,7 +6,7 @@ import type { User } from "@/lib/api";
 const NAV_ITEMS = [
   { href: "#overview", label: "Overview", icon: LayoutDashboard },
   { href: "#documents", label: "Documents", icon: FileText },
-  { href: "#lab-reports", label: "Lab reports", icon: FlaskConical },
+  { href: "#lab-levels", label: "Lab levels", icon: FlaskConical },
   { href: "#prescriptions", label: "Prescriptions", icon: Pill },
   { href: "#report-generator", label: "Generate report", icon: Stethoscope },
 ];

@@ -242,7 +242,7 @@ export default function DashboardPage() {
           )}
 
           {labReports.length > 0 && (
-            <div>
+            <div id="lab-levels">
               <h2 className="mb-3 text-sm font-semibold text-slate-700">Detected levels</h2>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {latestLabValues(labReports).map((v) => (
@@ -392,56 +392,6 @@ export default function DashboardPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </Card>
-
-          <Card id="lab-reports">
-            <CardHeader title="Lab reports" subtitle="Test results from your uploads" icon={<FlaskConical className="h-4 w-4" />} />
-            {labReports.length === 0 ? (
-              <EmptyState text="No lab reports yet." />
-            ) : (
-              <div className="space-y-6">
-                {labReports.map((report) => (
-                  <div key={report.id}>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {report.report_type || "Lab Report"}
-                      {report.lab_name ? (
-                        <span className="font-normal text-slate-500"> · {report.lab_name}</span>
-                      ) : null}
-                    </p>
-                    <div className="mt-2 overflow-x-auto rounded-lg border border-slate-100">
-                      <table className="w-full text-left text-sm">
-                        <thead>
-                          <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
-                            <th className="px-3 py-2 font-medium">Test</th>
-                            <th className="px-3 py-2 font-medium">Value</th>
-                            <th className="px-3 py-2 font-medium">Range</th>
-                            <th className="px-3 py-2 font-medium text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {report.lab_values.map((v) => (
-                            <tr key={v.id}>
-                              <td className="px-3 py-2">{v.test_name_normalized || v.test_name}</td>
-                              <td className="px-3 py-2">
-                                {v.value_text || v.value} {v.unit || ""}
-                              </td>
-                              <td className="px-3 py-2 text-slate-500">{v.reference_range_text || "—"}</td>
-                              <td className="px-3 py-2 text-right">
-                                {v.is_abnormal ? (
-                                  <Badge tone="red">Abnormal</Badge>
-                                ) : (
-                                  <Badge tone="green">Normal</Badge>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </Card>
