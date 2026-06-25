@@ -292,6 +292,110 @@ export function suggestSpecialist(messages: ChatMessage[]): Promise<SpecialistSu
   });
 }
 
+// ── Treatment tracking ────────────────────────────────────────────────────
+
+export interface MedicationAdherence {
+  medication_id: number;
+  medication_name: string;
+  dosage: string | null;
+  frequency: string | null;
+  duration: string | null;
+  prescription_id: number;
+  taken_last_n_days: number;
+  skipped_last_n_days: number;
+  adherence_pct: number | null;
+  logged_today: boolean;
+}
+
+export interface Consultation {
+  id: number;
+  prescription_id: number | null;
+  doctor_name: string | null;
+  specialty: string | null;
+  scheduled_at: string;
+  location: string | null;
+  reason: string | null;
+  notes: string | null;
+  status: "scheduled" | "completed" | "cancelled";
+  created_at: string;
+}
+
+export interface TrackingSummary {
+  days: number;
+  medications: MedicationAdherence[];
+  upcoming_consultations: Consultation[];
+}
+
+export function getTrackingSummary(days = 7): Promise<TrackingSummary> {
+  return request(`/tracking/summary?days=${days}`);
+}
+
+export function logDose(
+  medId: number,
+  data: { taken_at?: string; skipped?: boolean; notes?: string }
+): Promise<{ id: number; medication_id: number; taken_at: string; skipped: boolean; notes: string | null }> {
+  return request(`/tracking/medications/${medId}/log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function getDoseLogs(
+  medId: number,
+  days = 30
+): Promise<{ id: number; medication_id: number; taken_at: string; skipped: boolean; notes: string | null }[]> {
+  return request(`/tracking/medications/${medId}/logs?days=${days}`);
+}
+
+export function deleteDoseLog(logId: number): Promise<{ deleted: number }> {
+  return request(`/tracking/medications/logs/${logId}`, { method: "DELETE" });
+}
+
+export function listConsultations(): Promise<Consultation[]> {
+  return request("/tracking/consultations");
+}
+
+export function createConsultation(data: {
+  prescription_id?: number;
+  doctor_name?: string;
+  specialty?: string;
+  scheduled_at: string;
+  location?: string;
+  reason?: string;
+  notes?: string;
+  status?: string;
+}): Promise<Consultation> {
+  return request("/tracking/consultations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateConsultation(
+  id: number,
+  data: Partial<{
+    doctor_name: string;
+    specialty: string;
+    scheduled_at: string;
+    location: string;
+    reason: string;
+    notes: string;
+    status: string;
+  }>
+): Promise<Consultation> {
+  return request(`/tracking/consultations/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteConsultation(id: number): Promise<{ deleted: number }> {
+  return request(`/tracking/consultations/${id}`, { method: "DELETE" });
+}
+
 export async function generateReportPdf(data: {
   specialist_type: string;
   symptoms: string;

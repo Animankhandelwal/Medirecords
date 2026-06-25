@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from app.core.config import settings
 from app.db.database import Base, engine
-from app.api import auth, documents, medical_data, assistant, report_generator
+from app.api import auth, documents, medical_data, assistant, report_generator, tracking
 import app.models  # noqa: F401 — ensures all models are registered before create_all
 
 Base.metadata.create_all(bind=engine)
@@ -40,6 +40,7 @@ app.include_router(documents.router)
 app.include_router(medical_data.router)
 app.include_router(assistant.router)
 app.include_router(report_generator.router)
+app.include_router(tracking.router)
 
 
 @app.get("/health")

@@ -28,6 +28,7 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { LabLevelCard } from "@/components/dashboard/lab-level-card";
 import { ReportGenerator } from "@/components/dashboard/report-generator";
+import { TreatmentTracker } from "@/components/dashboard/treatment-tracker";
 import { ChatWidget } from "@/components/chat/chat-widget";
 import {
   ActivitySquare,
@@ -424,6 +425,14 @@ export default function DashboardPage() {
               </div>
             )}
           </Card>
+
+          <TreatmentTracker
+            prescriptions={prescriptions.map((rx) => ({
+              id: rx.id,
+              diagnosis: rx.diagnosis,
+              doctor_name: rx.doctor_name,
+            }))}
+          />
 
           <ReportGenerator suggestedSpecialist={suggestedSpecialist} />
         </main>
