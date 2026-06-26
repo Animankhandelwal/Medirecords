@@ -273,6 +273,21 @@ export async function streamChat(
   }
 }
 
+export interface TermExplanation {
+  term: string;
+  type: "lab_test" | "diagnosis";
+  explanation: string;
+}
+
+export function explainTerm(
+  term: string,
+  type: "lab_test" | "diagnosis"
+): Promise<TermExplanation> {
+  return request(
+    `/assistant/explain?term=${encodeURIComponent(term)}&type=${type}`
+  );
+}
+
 export function listSpecialists(): Promise<string[]> {
   return request("/report/specialists");
 }

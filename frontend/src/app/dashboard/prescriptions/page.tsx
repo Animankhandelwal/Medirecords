@@ -1,10 +1,85 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { listPrescriptions, type Prescription } from "@/lib/api";
-import { Card, CardHeader } from "@/components/ui/card";
+import { useEffect, useRef, useState } from "react";
+import { listPrescriptions, explainTerm, type Prescription } from "@/lib/api";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, FileText, Pill, Stethoscope } from "lucide-react";
+import { Calendar, FileText, HelpCircle, Pill, Stethoscope, X } from "lucide-react";
+
+/** Module-level cache so repeated opens are instant */
+const _diagnosisCache = new Map<string, string>();
+
+function DiagnosisExplainer({ diagnosis }: { diagnosis: string }) {
+  const [open, setOpen] = useState(false);
+  const [explanation, setExplanation] = useState<string | null>(
+    _diagnosisCache.get(diagnosis) ?? null
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  async function handleToggle() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+
+    if (_diagnosisCache.has(diagnosis)) {
+      setExplanation(_diagnosisCache.get(diagnosis)!);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const res = await explainTerm(diagnosis, "diagnosis");
+      _diagnosisCache.set(diagnosis, res.explanation);
+      setExplanation(res.explanation);
+    } catch {
+      setError("Couldn't load explanation. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleToggle}
+        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+          open
+            ? "bg-brand-100 text-brand-700"
+            : "bg-slate-100 text-slate-500 hover:bg-brand-50 hover:text-brand-600"
+        }`}
+      >
+        {open ? <X className="h-3 w-3" /> : <HelpCircle className="h-3 w-3" />}
+        {open ? "Close" : "What is this?"}
+      </button>
+
+      {open && (
+        <div
+          ref={panelRef}
+          className="mt-3 rounded-xl border border-brand-100 bg-gradient-to-br from-brand-50 to-purple-50/40 p-4 text-sm leading-relaxed text-slate-700 animate-fade-in"
+        >
+          {loading ? (
+            <div className="flex items-center gap-2 text-slate-400 text-xs">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border border-brand-400 border-t-transparent" />
+              Fetching plain-language explanation…
+            </div>
+          ) : error ? (
+            <p className="text-xs text-red-600">{error}</p>
+          ) : explanation ? (
+            <>
+              <p className="font-semibold text-slate-800 mb-2">About: {diagnosis}</p>
+              <p>{explanation}</p>
+              <p className="mt-3 text-xs text-slate-400 italic">
+                This is a general overview. For advice specific to your situation, always consult your doctor.
+              </p>
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function MedicationChip({ name, dosage, frequency, isActive }: {
   name: string; dosage: string | null; frequency: string | null; isActive: boolean;
@@ -47,6 +122,7 @@ export default function PrescriptionsPage() {
         <h1 className="text-2xl font-extrabold text-slate-900">Prescriptions</h1>
         <p className="mt-1 text-sm text-slate-500">
           All your diagnoses and prescribed medications, extracted from your documents.
+          Click <span className="font-medium text-brand-600">"What is this?"</span> on any diagnosis for a plain-language explanation.
         </p>
       </div>
 
@@ -81,19 +157,21 @@ export default function PrescriptionsPage() {
           <FileText className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <p className="font-semibold text-slate-500">No prescriptions yet</p>
           <p className="mt-1 text-sm text-slate-400">
-            Upload a prescription from the <a href="/dashboard/records" className="text-brand-600 hover:underline">Records</a> page and AI will extract the medications.
+            Upload a prescription from the{" "}
+            <a href="/dashboard/records" className="text-brand-600 hover:underline">Records</a>{" "}
+            page and AI will extract the medications.
           </p>
         </div>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {prescriptions.map((rx) => (
             <Card key={rx.id} className="flex flex-col">
-              {/* Header */}
-              <div className="mb-4 flex items-start gap-3">
+              {/* Prescription header */}
+              <div className="mb-3 flex items-start gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50">
                   <Stethoscope className="h-5 w-5 text-brand-600" />
                 </span>
-                <div>
+                <div className="min-w-0">
                   <h3 className="font-semibold text-slate-900 leading-snug">
                     {rx.diagnosis || "Prescription"}
                   </h3>
@@ -106,11 +184,24 @@ export default function PrescriptionsPage() {
                 </div>
               </div>
 
+              {/* Date */}
               {rx.prescription_date && (
                 <div className="mb-3 flex items-center gap-1.5 text-xs text-slate-400">
                   <Calendar className="h-3.5 w-3.5" />
                   {new Date(rx.prescription_date).toLocaleDateString(undefined, { dateStyle: "medium" })}
                 </div>
+              )}
+
+              {/* Diagnosis explainer */}
+              {rx.diagnosis && (
+                <div className="mb-4">
+                  <DiagnosisExplainer diagnosis={rx.diagnosis} />
+                </div>
+              )}
+
+              {/* Separator */}
+              {rx.medications.length > 0 && (
+                <div className="mb-3 border-t border-slate-100" />
               )}
 
               {/* Medications */}
